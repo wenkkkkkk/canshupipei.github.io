@@ -69,7 +69,7 @@
         <h1>参数匹配</h1>
         <input type="file" id="excelInput" accept=".xlsx">
         <div id="paramForm"></div>
-        <button onclick="matchParams()" disabled>匹配参数</button>
+        <button onclick="matchParams()">匹配参数</button>
         <div id="result"></div>
         <div id="chart-container">
             <canvas id="paramChart"></canvas>
@@ -80,6 +80,27 @@
         let excelData = [];
         let headers = [];
         let paramChart = null;
+        let paramCount = 3; // 默认参数个数为3
+
+        // 内嵌默认表格数据
+        const defaultData = {
+            headers: ['ID', 'dalta_EGT', 'dalta_FF%', 'dalta_N2%', 'hint'],
+            data: [
+                [1, 10, 20, 30, 'VSV CLOSED 2°'],
+                [2, 15, 25, 35, '-1% HPC Efficiency'],
+                [3, 20, 30, 40, '-1% HPT Efficiency'],
+                [4, 25, 35, 45, '-1% LPT Efficiency'],
+                [5, 30, 40, 50, 'VBV OPEN 10°']
+            ]
+        };
+
+        // 初始化数据
+        function initializeData() {
+            headers = defaultData.headers;
+            excelData = defaultData.data;
+            paramCount = headers.length - 2; // 参数个数为列数减2（假设第一列是ID，最后一列是hint）
+            generateParamForm();
+        }
 
         // 读取 Excel 文件
         function readExcel(file) {
@@ -93,6 +114,7 @@
                     const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
                     headers = jsonData[0];
                     excelData = jsonData.slice(1);
+                    paramCount = headers.length - 1; // 参数个数为列数减2
                     resolve();
                 };
                 reader.readAsArrayBuffer(file);
@@ -106,8 +128,8 @@
         function generateParamForm() {
             const paramFormDiv = document.getElementById('paramForm');
             paramFormDiv.innerHTML = '<h2>请输入参数</h2>';
-            // 假设用户需要输入三个参数，对应 Excel 的第二到第四列
-            for (let i = 1; i <= 3; i++) {
+            
+            for (let i = 1; i <= paramCount; i++) {
                 const div = document.createElement('div');
                 div.className = 'param-input';
                 div.innerHTML = `
@@ -116,46 +138,60 @@
                 `;
                 paramFormDiv.appendChild(div);
             }
-            document.querySelector('button').disabled = false;
         }
 
-        // 匹配参数并计算 RMSE 和余弦相似度
+        // 匹配参数并计算符号匹配、RMSE 和余弦相似度
         function matchParams() {
             // 获取用户输入的参数
             const params = [];
-            for (let i = 1; i <= 3; i++) {
+            for (let i = 1; i <= paramCount; i++) {
                 const input = document.getElementById(`param${i}`);
                 params.push(parseFloat(input.value));
             }
 
-            // 计算每一行的 RMSE 和余弦相似度
+            // 计算每一行的符号匹配、RMSE 和余弦相似度
             const results = [];
             for (const row of excelData) {
-                if (row.length >= 4) {
-                    const rowParams = row.slice(1, 4).map(Number);
+                if (row.length >= paramCount + 1) {
+                    const rowParams = row.slice(1, paramCount + 1).map(Number);
+                    const symbolMatch = calculateSymbolMatch(params, rowParams);
                     const rmse = calculateRMSE(params, rowParams);
                     const cosineSimilarity = calculateCosineSimilarity(params, rowParams);
                     results.push({
                         row: row,
+                        symbolMatch: symbolMatch,
                         rmse: rmse,
                         cosineSimilarity: cosineSimilarity
                     });
                 }
             }
 
-            // 按 RMSE 排序并获取前两名
-            const rmseSorted = [...results].sort((a, b) => a.rmse - b.rmse);
-            const topTwoRMSE = rmseSorted.slice(0, 2);
+            // 按符号匹配优先级排序，其次按余弦相似度排序
+            results.sort((a, b) => {
+                if (a.symbolMatch !== b.symbolMatch) {
+                    return b.symbolMatch - a.symbolMatch; // 符号匹配优先级高
+                }
+                return b.cosineSimilarity - a.cosineSimilarity; // 其次按余弦相似度
+            });
 
-            // 按余弦相似度排序并获取前两名
-            const cosineSorted = [...results].sort((a, b) => b.cosineSimilarity - a.cosineSimilarity);
-            const topTwoCosine = cosineSorted.slice(0, 2);
+            // 获取符号全匹配的结果（符号匹配数等于参数个数）
+            const fullSymbolMatchResults = results.filter(item => item.symbolMatch === paramCount);
 
-            // 获取最佳匹配行（RMSE最小的行）
-            const bestMatch = rmseSorted[0];
+            displayResults(fullSymbolMatchResults, results, params);
+            createChart(params, results[0].row.slice(1, paramCount + 1));
+        }
 
-            displayResults(topTwoRMSE, topTwoCosine, params);
-            createChart(params, bestMatch.row.slice(1, 4));
+        // 计算符号匹配
+        function calculateSymbolMatch(userParams, rowParams) {
+            let matchCount = 0;
+            for (let i = 0; i < userParams.length; i++) {
+                const userParam = userParams[i];
+                const rowParam = rowParams[i];
+                if ((userParam >= 0 && rowParam >= 0) || (userParam < 0 && rowParam < 0)) {
+                    matchCount++;
+                }
+            }
+            return matchCount;
         }
 
         // 计算均方根误差 (RMSE)
@@ -190,37 +226,83 @@
         }
 
         // 显示结果
-        function displayResults(topTwoRMSE, topTwoCosine, userParams) {
+        function displayResults(fullSymbolMatchResults, results, userParams) {
             const resultDiv = document.getElementById('result');
+            
+            // 显示用户输入参数
             resultDiv.innerHTML = `
                 <h2>匹配结果</h2>
                 <p>用户输入参数: ${userParams}</p>
+            `;
+
+            // 显示符号全匹配的结果
+            if (fullSymbolMatchResults.length == userParams.length) {
+                resultDiv.innerHTML += `
+                    <div class="method-results">
+                        <h3>符号全匹配结果</h3>
+                        <table>
+                            <tr>
+                                ${headers.map(header => `<th>${header}</th>`).join('')}
+                                <th>符号匹配数</th>
+                                <th>余弦相似度</th>
+                                <th>RMSE</th>
+                            </tr>
+                            ${fullSymbolMatchResults.map(item => `
+                                <tr>
+                                    ${item.row.map(cell => `<td>${cell}</td>`).join('')}
+                                    <td>${item.symbolMatch}</td>
+                                    <td>${item.cosineSimilarity.toFixed(4)}</td>
+                                    <td>${item.rmse.toFixed(4)}</td>
+                                </tr>
+                            `).join('')}
+                        </table>
+                    </div>
+                `;
+            } else {
+                resultDiv.innerHTML += '<p style="color:red">无符号全匹配结果</p>';
+            }
+
+            // 显示余弦相似度排序结果
+            resultDiv.innerHTML += `
                 <div class="method-results">
-                    <h3>均方根误差 (RMSE) 前两名</h3>
+                    <h3>余弦相似度排序参考结果</h3>
+                    
                     <table>
                         <tr>
                             ${headers.map(header => `<th>${header}</th>`).join('')}
-                            <th>RMSE</th>
+                            <th>符号匹配数</th>
+                            <th>余弦相似度</th>
+                            
                         </tr>
-                        ${topTwoRMSE.map(item => `
+                        ${results.sort((a, b) => b.cosineSimilarity - a.cosineSimilarity).map(item => `
                             <tr>
                                 ${item.row.map(cell => `<td>${cell}</td>`).join('')}
-                                <td>${item.rmse.toFixed(4)}</td>
+                                <td>${item.symbolMatch}</td>
+                                <td>${item.cosineSimilarity.toFixed(4)}</td>
+                                
                             </tr>
                         `).join('')}
                     </table>
                 </div>
+            `;
+
+            // 显示 RMSE 排序结果
+            resultDiv.innerHTML += `
                 <div class="method-results">
-                    <h3>余弦相似度 前两名</h3>
+                    <h3>RMSE 排序参考结果</h3>
                     <table>
                         <tr>
                             ${headers.map(header => `<th>${header}</th>`).join('')}
-                            <th>余弦相似度</th>
+                            <th>符号匹配数</th>
+                            
+                            <th>RMSE</th>
                         </tr>
-                        ${topTwoCosine.map(item => `
+                        ${results.sort((a, b) => a.rmse - b.rmse).map(item => `
                             <tr>
                                 ${item.row.map(cell => `<td>${cell}</td>`).join('')}
-                                <td>${item.cosineSimilarity.toFixed(4)}</td>
+                                <td>${item.symbolMatch}</td>
+                                
+                                <td>${item.rmse.toFixed(4)}</td>
                             </tr>
                         `).join('')}
                     </table>
@@ -240,7 +322,7 @@
             paramChart = new Chart(ctx, {
                 type: 'bar',
                 data: {
-                    labels: ['参数 1', '参数 2', '参数 3'],
+                    labels: headers.slice(1, paramCount + 1),
                     datasets: [
                         {
                             label: '用户输入参数',
@@ -282,12 +364,20 @@
             const file = event.target.files[0];
             if (file) {
                 if (file.name.endsWith('.xlsx')) {
-                    readExcel(file).then(generateParamForm).catch(error => console.error('Error reading Excel:', error));
+                    readExcel(file).then(() => {
+                        generateParamForm();
+                    }).catch(error => {
+                        console.error('Error reading Excel:', error);
+                        alert('读取文件时出错，请检查文件格式是否正确');
+                    });
                 } else {
                     alert('不支持的文件格式');
                 }
             }
         });
+
+        // 页面加载时初始化数据
+        window.onload = initializeData;
     </script>
 </body>
 </html>
