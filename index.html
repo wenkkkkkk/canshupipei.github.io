@@ -235,32 +235,7 @@
                 <p>用户输入参数: ${userParams}</p>
             `;
 
-            // 显示符号全匹配的结果
-            if (fullSymbolMatchResults.length == userParams.length) {
-                resultDiv.innerHTML += `
-                    <div class="method-results">
-                        <h3>符号全匹配结果</h3>
-                        <table>
-                            <tr>
-                                ${headers.map(header => `<th>${header}</th>`).join('')}
-                                <th>符号匹配数</th>
-                                <th>余弦相似度</th>
-                                <th>RMSE</th>
-                            </tr>
-                            ${fullSymbolMatchResults.map(item => `
-                                <tr>
-                                    ${item.row.map(cell => `<td>${cell}</td>`).join('')}
-                                    <td>${item.symbolMatch}</td>
-                                    <td>${item.cosineSimilarity.toFixed(4)}</td>
-                                    <td>${item.rmse.toFixed(4)}</td>
-                                </tr>
-                            `).join('')}
-                        </table>
-                    </div>
-                `;
-            } else {
-                resultDiv.innerHTML += '<p style="color:red">无符号全匹配结果</p>';
-            }
+
 
             // 显示余弦相似度排序结果
             resultDiv.innerHTML += `
